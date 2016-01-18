@@ -8,6 +8,11 @@ Initially testing the behavior of several possible alterations:
 3.  covariance penalty (decaying weight)
 4.  correlation penalty (decaying weight)
 
-Each of the above will be tested with several different weight and decay paramater settings. Each of the above will be tested on both the theano tutorial MLP and Convnet.
+Additional steps will include:
 
-Additional experiments may include altering the minibatch size, and sampling from the activations in the minibatch.
+- testing multiple weight and decay paramater weights
+- testing with both the theano tutorial MLP and Convnet
+- altering minibatch size
+- sampling from unit activations
+- sampling from minibatch samples
+- randomizing minibatches
