@@ -2,6 +2,7 @@
 Research on the effects of decorrelating the hidden activations in neural networks
 
 Initially testing the behavior of several possible alterations:
+
 1.  covariance penalty (fixed weight)
 2.  correlation penalty (fixed weight)
 3.  covariance penalty (decaying weight)
