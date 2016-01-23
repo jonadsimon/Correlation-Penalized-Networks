@@ -16,3 +16,7 @@ Additional steps will include:
 - sampling from unit activations
 - sampling from minibatch samples
 - randomizing minibatches
+
+Standard MLP takes ~9.6s per iteration
+Covariance-Penalized MLP takes ~27.4s per iteration
+Therefore Covariance-Penalization takes ~2.85x longer to run

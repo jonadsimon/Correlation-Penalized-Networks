@@ -25,7 +25,7 @@ import os
 import sys
 import timeit
 
-import numpy
+import numpy as np
 import theano
 import theano.tensor as T
 
@@ -120,8 +120,21 @@ class MLP(object):
         # keep track of model input
         self.input = input
 
+    def set_covariance(self):
+        '''
+        Computes and sets class variable "self.off_diag_cov_sqr"
+        See LaTeX notes for an explanation of the formula
+        Also, consider *not* making everything "self"
+        '''
+        self.minibatch_size = self.hiddenLayer.output.shape[0]
+        self.mean_activation = self.hiddenLayer.output.mean(0)
+        self.centered_activation = self.hiddenLayer.output - self.mean_activation # casts over rows
+        self.activation_covariance = 1.0/(self.minibatch_size-1) * self.centered_activation.T.dot(self.centered_activation)
+        self.covariance_squared = self.activation_covariance**2 # element-wise squaring
+        self.off_diag_cov_sqr = self.covariance_squared.sum() - self.covariance_squared.diagonal().sum() # not numerically stable...
 
-def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
+
+def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, n_epochs=1000,
              dataset='mnist.pkl.gz', batch_size=20, n_hidden=500):
     """
     Demonstrate stochastic gradient descent optimization for a multilayer
@@ -149,17 +162,15 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
                  http://www.iro.umontreal.ca/~lisa/deep/data/mnist/mnist.pkl.gz
 
 
-   """
+    """
     datasets = load_data(dataset)
 
     train_set_x, train_set_y = datasets[0]
     valid_set_x, valid_set_y = datasets[1]
-    test_set_x, test_set_y = datasets[2]
 
     # compute number of minibatches for training, validation and testing
     n_train_batches = train_set_x.get_value(borrow=True).shape[0] / batch_size
     n_valid_batches = valid_set_x.get_value(borrow=True).shape[0] / batch_size
-    n_test_batches = test_set_x.get_value(borrow=True).shape[0] / batch_size
 
     ######################
     # BUILD ACTUAL MODEL #
@@ -172,7 +183,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     y = T.ivector('y')  # the labels are presented as 1D vector of
                         # [int] labels
 
-    rng = numpy.random.RandomState(1234)
+    rng = np.random.RandomState(1234)
 
     # construct the MLP class
     classifier = MLP(
@@ -187,24 +198,24 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     # the cost we minimize during training is the negative log likelihood of
     # the model plus the regularization terms (L1 and L2); cost is expressed
     # here symbolically
-    cost = (
-        classifier.negative_log_likelihood(y)
-        + L1_reg * classifier.L1
-        + L2_reg * classifier.L2_sqr
-    )
+    if cov_reg != 0:
+        classifier.set_covariance()
+        cost = (
+            classifier.negative_log_likelihood(y)
+            + L1_reg * classifier.L1
+            + L2_reg * classifier.L2_sqr
+            + cov_reg * classifier.off_diag_cov_sqr
+        )
+    else:
+        cost = (
+            classifier.negative_log_likelihood(y)
+            + L1_reg * classifier.L1
+            + L2_reg * classifier.L2_sqr
+        )
     # end-snippet-4
 
     # compiling a Theano function that computes the mistakes that are made
     # by the model on a minibatch
-    test_model = theano.function(
-        inputs=[index],
-        outputs=classifier.errors(y),
-        givens={
-            x: test_set_x[index * batch_size:(index + 1) * batch_size],
-            y: test_set_y[index * batch_size:(index + 1) * batch_size]
-        }
-    )
-
     validate_model = theano.function(
         inputs=[index],
         outputs=classifier.errors(y),
@@ -250,84 +261,37 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, n_epochs=1000,
     ###############
     print '... training'
 
-    # early-stopping parameters
-    patience = 10000  # look as this many examples regardless
-    patience_increase = 2  # wait this much longer when a new best is
-                           # found
-    improvement_threshold = 0.995  # a relative improvement of this much is
-                                   # considered significant
-    validation_frequency = min(n_train_batches, patience / 2)
-                                  # go through this many
-                                  # minibatche before checking the network
-                                  # on the validation set; in this case we
-                                  # check every epoch
-
-    best_validation_loss = numpy.inf
-    best_iter = 0
-    test_score = 0.
+    best_validation_loss = np.inf
+    best_epoch = 0
     start_time = timeit.default_timer()
 
     epoch = 0
-    done_looping = False
-
-    while (epoch < n_epochs) and (not done_looping):
-        epoch = epoch + 1
+    while epoch < n_epochs:
+        epoch += 1
         for minibatch_index in xrange(n_train_batches):
 
             minibatch_avg_cost = train_model(minibatch_index)
-            # iteration number
-            iter = (epoch - 1) * n_train_batches + minibatch_index
 
-            if (iter + 1) % validation_frequency == 0:
-                # compute zero-one loss on validation set
-                validation_losses = [validate_model(i) for i
-                                     in xrange(n_valid_batches)]
-                this_validation_loss = numpy.mean(validation_losses)
+        # compute zero-one loss on validation set
+        validation_losses = [validate_model(i) for i
+                             in xrange(n_valid_batches)]
+        this_validation_loss = np.mean(validation_losses)
 
-                print(
-                    'epoch %i, minibatch %i/%i, validation error %f %%' %
-                    (
-                        epoch,
-                        minibatch_index + 1,
-                        n_train_batches,
-                        this_validation_loss * 100.
-                    )
-                )
+        print('epoch %i, validation error %f %%' % (epoch, this_validation_loss * 100.))
 
-                # if we got the best validation score until now
-                if this_validation_loss < best_validation_loss:
-                    #improve patience if loss improvement is good enough
-                    if (
-                        this_validation_loss < best_validation_loss *
-                        improvement_threshold
-                    ):
-                        patience = max(patience, iter * patience_increase)
+        # if we got the best validation score until now
+        if this_validation_loss < best_validation_loss:
 
-                    best_validation_loss = this_validation_loss
-                    best_iter = iter
-
-                    # test it on the test set
-                    test_losses = [test_model(i) for i
-                                   in xrange(n_test_batches)]
-                    test_score = numpy.mean(test_losses)
-
-                    print(('     epoch %i, minibatch %i/%i, test error of '
-                           'best model %f %%') %
-                          (epoch, minibatch_index + 1, n_train_batches,
-                           test_score * 100.))
-
-            if patience <= iter:
-                done_looping = True
-                break
+            best_validation_loss = this_validation_loss
+            best_epoch = epoch
 
     end_time = timeit.default_timer()
     print(('Optimization complete. Best validation score of %f %% '
-           'obtained at iteration %i, with test performance %f %%') %
-          (best_validation_loss * 100., best_iter + 1, test_score * 100.))
-    print >> sys.stderr, ('The code for file ' +
-                          os.path.split(__file__)[1] +
-                          ' ran for %.2fm' % ((end_time - start_time) / 60.))
+           'obtained following epoch %i') %
+          (best_validation_loss * 100., best_epoch))
+
+    print "Training process ran for %.2fm" % ((end_time - start_time) / 60.)
 
 
 if __name__ == '__main__':
-    test_mlp()
+    test_mlp(cov_reg=0.00001, n_epochs=10)
