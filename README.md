@@ -20,3 +20,5 @@ Additional steps will include:
 Standard MLP takes ~9.6s per iteration
 Covariance-Penalized MLP takes ~27.4s per iteration
 Therefore Covariance-Penalization takes ~2.85x longer to run
+
+Note that increasing the batch size should increase the usefulness of the penalization,by providing a more accurate estimate of each hidden unit’s activation timecourse

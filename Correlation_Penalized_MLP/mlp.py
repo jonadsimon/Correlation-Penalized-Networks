@@ -179,6 +179,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, n_epo
 
     # allocate symbolic variables for the data
     index = T.lscalar()  # index to a [mini]batch
+    perm = T.lvector()  # permutation of the indices of the training samples
     x = T.matrix('x')  # the data is presented as rasterized images
     y = T.ivector('y')  # the labels are presented as 1D vector of
                         # [int] labels
@@ -246,12 +247,12 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, n_epo
     # in the same time updates the parameter of the model based on the rules
     # defined in `updates`
     train_model = theano.function(
-        inputs=[index],
+        inputs=[index,perm],
         outputs=cost,
         updates=updates,
         givens={
-            x: train_set_x[index * batch_size: (index + 1) * batch_size],
-            y: train_set_y[index * batch_size: (index + 1) * batch_size]
+            x: train_set_x[perm[index * batch_size: (index + 1) * batch_size]],
+            y: train_set_y[perm[index * batch_size: (index + 1) * batch_size]]
         }
     )
     # end-snippet-5
@@ -268,9 +269,11 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, n_epo
     epoch = 0
     while epoch < n_epochs:
         epoch += 1
+        index_perm = rng.permutation(train_set_x.get_value(borrow=True).shape[0])  # generate new permutation of indices
+
         for minibatch_index in xrange(n_train_batches):
 
-            minibatch_avg_cost = train_model(minibatch_index)
+            minibatch_avg_cost = train_model(minibatch_index, index_perm)
 
         # compute zero-one loss on validation set
         validation_losses = [validate_model(i) for i
@@ -294,4 +297,4 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, n_epo
 
 
 if __name__ == '__main__':
-    test_mlp(cov_reg=0.00001, n_epochs=10)
+    test_mlp(cov_reg=0.0001, n_epochs=10, batch_size=100)
