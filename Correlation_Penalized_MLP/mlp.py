@@ -125,17 +125,38 @@ class MLP(object):
         Computes and sets class variable "self.off_diag_cov_sqr"
         See LaTeX notes for an explanation of the formula
         Also, consider *not* making everything "self"
+        Q: What's the downside of using "np.cov", as I'm doing now?
+        A: Can't auto-compute gradient
         '''
         self.minibatch_size = self.hiddenLayer.output.shape[0]
         self.mean_activation = self.hiddenLayer.output.mean(0)
         self.centered_activation = self.hiddenLayer.output - self.mean_activation # casts over rows
         self.activation_covariance = 1.0/(self.minibatch_size-1) * self.centered_activation.T.dot(self.centered_activation)
+        # self.activation_covariance = np.cov(self.hiddenLayer.output, rowvar=0) # replaces the above 4 lines
         self.covariance_squared = self.activation_covariance**2 # element-wise squaring
         self.off_diag_cov_sqr = self.covariance_squared.sum() - self.covariance_squared.diagonal().sum() # not numerically stable...
 
+    def set_correlation(self):
+        '''
+        Computes and sets class variable "self.off_diag_cor_sqr"
+        See LaTeX notes for an explanation of the formula, and further optimizations
+        Also, consider *not* making everything "self"
+        Q: What's the downside of using "np.corrcoef", as I'm doing now?
+        A: Can't auto-compute gradient
+        '''
+        self.minibatch_size = self.hiddenLayer.output.shape[0]
+        self.mean_activation = self.hiddenLayer.output.mean(0)
+        self.centered_activation = self.hiddenLayer.output - self.mean_activation # casts over rows
+        self.activation_covariance = 1.0/(self.minibatch_size-1) * self.centered_activation.T.dot(self.centered_activation)
+        self.inv_std_vec = (1.0/(self.minibatch_size-1) * (self.centered_activation**2).sum(0))**(-0.5)
+        self.activation_correlation = (self.inv_std_vec * self.activation_covariance).T * self.inv_std_vec # works because matrix is symmetric
+        # self.activation_correlation = np.corrcoef(self.hiddenLayer.output, rowvar=0) # replaces the above 6 lines
+        self.correlation_squared = self.activation_correlation**2 # element-wise squaring
+        self.off_diag_cor_sqr = self.correlation_squared.sum() - self.correlation_squared.diagonal().sum() # not numerically stable...
 
-def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, n_epochs=1000,
-             dataset='mnist.pkl.gz', batch_size=20, n_hidden=500):
+
+def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, cor_reg=0.00,
+             n_epochs=1000, dataset='mnist.pkl.gz', batch_size=20, n_hidden=500):
     """
     Demonstrate stochastic gradient descent optimization for a multilayer
     perceptron
@@ -199,7 +220,13 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, n_epo
     # the cost we minimize during training is the negative log likelihood of
     # the model plus the regularization terms (L1 and L2); cost is expressed
     # here symbolically
-    if cov_reg != 0:
+    if cov_reg == 0 and cor_reg == 0:
+        cost = (
+            classifier.negative_log_likelihood(y)
+            + L1_reg * classifier.L1
+            + L2_reg * classifier.L2_sqr
+        )
+    elif cov_reg != 0 and cor_reg == 0:
         classifier.set_covariance()
         cost = (
             classifier.negative_log_likelihood(y)
@@ -207,12 +234,17 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, n_epo
             + L2_reg * classifier.L2_sqr
             + cov_reg * classifier.off_diag_cov_sqr
         )
-    else:
+    elif cov_reg == 0 and cor_reg != 0:
+        classifier.set_correlation()
         cost = (
             classifier.negative_log_likelihood(y)
             + L1_reg * classifier.L1
             + L2_reg * classifier.L2_sqr
+            + cor_reg * classifier.off_diag_cor_sqr
         )
+    else:
+        print "Cannot use covariance and correlation penalties simulataneously.\nTerminating program..."
+        sys.exit()
     # end-snippet-4
 
     # compiling a Theano function that computes the mistakes that are made
@@ -297,4 +329,4 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, n_epo
 
 
 if __name__ == '__main__':
-    test_mlp(cov_reg=0.0001, n_epochs=10, batch_size=100)
+    test_mlp(cor_reg=0.001, n_epochs=10, batch_size=500)

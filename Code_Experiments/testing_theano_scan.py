@@ -19,20 +19,20 @@ o_bar_np = A.mean(0)
 print o_bar_np, '\n'
 A_cent_np = A - o_bar_np # is correct shape for casting?
 print A_cent_np, '\n'
-sigma_scaled_np = A_cent_np.T.dot(A_cent_np)
-print sigma_scaled_np
+sigma_np = 1.0/(A.shape[0]-1) * A_cent_np.T.dot(A_cent_np)
+print sigma_np, '\n\n'
 
 
 A_theano = theano.shared(value=A, name='A_theano', borrow=True)
-print A_theano.eval()
+print A_theano.eval(), '\n'
 mean_activation = A_theano.mean(0)
-print mean_activation.eval()
+print mean_activation.eval(), '\n'
 centered_activation = A_theano - mean_activation # casts over rows
-print centered_activation.eval()
-activation_covariance_scaled = centered_activation.T.dot(centered_activation)
-print activation_covariance_scaled.eval()
-off_diag_cov_sqr = (activation_covariance_scaled**2).sum() - (activation_covariance_scaled**2).diagonal().sum()
-print off_diag_cov_sqr.eval()
+print centered_activation.eval(), '\n'
+activation_covariance = 1.0/(A_theano.shape[0]-1) * centered_activation.T.dot(centered_activation)
+print activation_covariance.eval(), '\n'
+off_diag_cov_sqr = (activation_covariance**2).sum() - (activation_covariance**2).diagonal().sum()
+print off_diag_cov_sqr.eval(), '\n\n'
 
 # # np_cov = np.zeros((7,7))
 # np_cov = 0
