@@ -1,0 +1,175 @@
+\documentclass[11pt, oneside]{article}   	% use "amsart" instead of "article" for AMSLaTeX format
+\usepackage{geometry}                		% See geometry.pdf to learn the layout options. There are lots.
+\geometry{letterpaper}                   		% ... or a4paper or a5paper or ... 
+%\geometry{landscape}                		% Activate for for rotated page geometry
+%\usepackage[parfill]{parskip}    		% Activate to begin paragraphs with an empty line rather than an indent
+\usepackage{graphicx}				% Use pdf, png, jpg, or eps§ with pdflatex; use eps in DVI mode
+								% TeX will automatically convert eps --> pdf in pdflatex		
+\usepackage{amssymb}
+
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{bbm}
+\usepackage{hyperref}
+
+\title{Theano Computations}
+\author{Jonathan Simon}
+%\date{}							% Activate to display a given date or no date
+
+\begin{document}
+\maketitle
+%\section{}
+%\subsection{}
+
+\section*{MLP Activation Layer}
+
+The hidden Layer in Theano's MLP is computed as: $X \rightarrow f(XW+b) = A$, implying that the the activation vectors are rows, and the batch-wide unit activation are columns. For an activation layer with $d$ hidden units and a minibatch of size $t$, the activation layer is given by the matrix:
+
+\begin{gather} 
+A = 
+\begin{bmatrix}
+    a_{11} & \dots & a_{1d} \\
+    \vdots  &          & \vdots \\
+    a_{t1} & \dots & a_{td}\\
+\end{bmatrix}
+= 
+\begin{bmatrix}
+    \vert  		   &          & \vert \\
+    u_{1}		   & \dots & u_{d} \\
+    \vert  		   &          & \vert \\
+%    \vert  		   &          & \vert \\
+%    \text{unit}_{1}   & \dots & \text{unit}_{d} \\
+%    \vert  		   &          & \vert \\
+\end{bmatrix}
+= 
+\begin{bmatrix}
+    \rule{.75cm}{0.5pt}  		   & o_{1}          & \rule{.75cm}{0.5pt} \\
+    & \vdots & \\
+    \rule{.75cm}{0.5pt} 		   & o_{t}         & \rule{.75cm}{0.5pt} \\
+%    \rule{.75cm}{0.5pt}  		   & \text{obs}_{1}          & \rule{.75cm}{0.5pt} \\
+%    & \vdots & \\
+%    \rule{.75cm}{0.5pt} 		   & \text{obs}_{t}         & \rule{.75cm}{0.5pt} \\
+\end{bmatrix}
+\end{gather}
+
+\begin{flalign*}
+& \text{where:} \\
+& u_i = t\text{-dimensional timecourse of the } i^{\text{th}} \text{ unit} \\
+& o_i = d\text{-dimensional state of the activation layer at the } i^{\text{th}} \text{ observation} \\
+\end{flalign*}
+
+%\text{where}\\
+%u_i = t \text{-dimensional timecourse of the}% $i^{\text{th}}$ unit}
+
+%u_i = t \text{-dimensional timecourse of the}% $i^{\text{th}}$ unit}
+%o_i = d\text{-dimensional state of the activation layer corresponding to the $i^{\text{th}}$ observation}
+
+%where $u_i = t$-dimensional timecourse of the $i^{\text{th}}$ unit
+%and $o_i = d$-dimensional state of the activation layer corresponding to the $i^{\text{th}}$ observation
+
+\subsection*{Covariance Computation}
+
+We can then compute the between-unit covariance using the formulas provided on the wikipedia pages:
+
+\begin{enumerate}
+  \item \url{https://en.wikipedia.org/wiki/Sample_mean_and_covariance}
+  \item \url{https://en.wikipedia.org/wiki/Estimation_of_covariance_matrices}
+  \item \url{https://en.wikipedia.org/wiki/Covariance}
+\end{enumerate}
+
+\noindent
+%Consider the definition of sample covariance for a pair of units $u_j$ and $u_k$, represented as $t$-dimensional column vectors:
+Consider the definition of covariance for a pair of random variables $U_j$ and $U_k$ representing the idealized scalar activations of the $j^\text{th}$ and $k^\text{th}$ hidden units respectively:
+\begin{gather}
+\operatorname{cov}(U_j,U_k) = \operatorname{E}\left[(U_j-\operatorname{E}[U_j])(U_k-\operatorname{E}[U_k])\right]
+%\operatorname{cov}(u_j,u_k) = \frac{1}{t-1}\bigg(\big(u_j-\operatorname{E}[u_j]\big)^\top\big(u_k-\operatorname{E}[u_k]\big)\bigg)
+\end{gather}
+
+\noindent
+Substituting the \textbf{random variables} $U_j$ and $U_k$ for the \textbf{column vectors} $u_j$ and $u_k$ of scalar activation observations:
+\begin{gather}
+\operatorname{cov}(u_j,u_k) = \frac{1}{t-1}\bigg(\big(u_j-\mathbbm{1}\overline{u}_j\big)^\top\big(u_k-\mathbbm{1}\overline{u}_k\big)\bigg)
+\intertext{where the \textbf{scalar} $\overline{u}_*$ is defined as:}
+\begin{aligned}
+\overline{u}_* &= \frac{1}{t} \sum_{i=1}^t \big[u_{*}\big]_{i} & \Bigg( = \frac{1}{t} \sum_{i=1}^t \big[o_{i}\big]_{*} \Bigg) \\
+\end{aligned}\notag
+\end{gather}
+
+\noindent
+We can then extend this calculation to all pairs of units in the hidden layer to compute the covariance matrix:
+\begin{gather}
+\Sigma = \frac{1}{t-1}\bigg(\big( A -  \mathbbm{1} \bar{o} \big)^\top \big( A -  \mathbbm{1} \bar{o} \big)\bigg)
+\intertext{where the \textbf{row vector} $\overline{o}$ is defined as:}
+\begin{aligned}
+\overline{o} &= \frac{1}{t} \sum_{i=1}^t o_{i}\\
+\end{aligned}\notag
+\end{gather}
+
+\subsection*{Correlation Computation}
+
+%Is there an efficient way to do this? Will it actually help the algorithm if I do do it? Hopefully not, since keeping the magnitude information helps keep activations in the linear regime (if I do it prior to the nonlinearity as with batch normalization). But on the other hand, large-magnitude units will result in high-variance estimates of the associated covariances, which makes the method noisier. Hmm...\\
+
+We can also compute the between-unit pearson correlation using the formulas provided at:
+\begin{enumerate}
+  \item \url{http://www.johndcook.com/blog/2008/11/05/how-to-calculate-pearson-correlation-accurately/}
+  \item \url{https://en.wikipedia.org/wiki/Pearson_product-moment_correlation_coefficient}
+\end{enumerate}
+
+\noindent
+Consider the definition of correlation for a pair of random variables $U_j$ and $U_k$ representing the idealized scalar activations of the $j^\text{th}$ and $k^\text{th}$ hidden units respectively:
+\begin{gather}
+\rho_{jk} = \dfrac{\operatorname{cov}(U_j,U_k)}{\sigma_j \sigma_k} = \dfrac{\operatorname{E}\left[(U_j-\operatorname{E}[U_j])(U_k-\operatorname{E}[U_k])\right]}{\sqrt{\operatorname{E}\left[(U_j-\operatorname{E}[U_j])^2\right]}\sqrt{\operatorname{E}\left[(U_k-\operatorname{E}[U_k])^2\right]}}
+\end{gather}
+
+\noindent
+Substituting the \textbf{random variables} $U_j$ and $U_k$ for the \textbf{column vectors} $u_j$ and $u_k$ of scalar activation observations:
+\begin{gather}
+%r_{jk} = \dfrac{1}{t-1}\Bigg(\dfrac{\big(u_j-\mathbbm{1}\overline{u}_j\big)^\top\big(u_k-\mathbbm{1}\overline{u}_k\big)}{\sqrt{\big(u_j-\mathbbm{1}\overline{u}_j\big)^\top\big(u_j-\mathbbm{1}\overline{u}_j\big)}\sqrt{\big(u_k-\mathbbm{1}\overline{u}_k\big)^\top\big(u_k-\mathbbm{1}\overline{u}_k\big)}}\Bigg)
+r_{jk} = \dfrac{\big(u_j-\mathbbm{1}\overline{u}_j\big)^\top\big(u_k-\mathbbm{1}\overline{u}_k\big)}{\sqrt{\big(u_j-\mathbbm{1}\overline{u}_j\big)^\top\big(u_j-\mathbbm{1}\overline{u}_j\big)}\sqrt{\big(u_k-\mathbbm{1}\overline{u}_k\big)^\top\big(u_k-\mathbbm{1}\overline{u}_k\big)}}
+\intertext{where the \textbf{scalar} $\overline{u}_*$ is defined as:}
+\begin{aligned}
+\overline{u}_* &= \frac{1}{t} \sum_{i=1}^t \big[u_{*}\big]_{i} & \Bigg( = \frac{1}{t} \sum_{i=1}^t \big[o_{i}\big]_{*} \Bigg) \\
+\end{aligned}\notag
+\end{gather}
+
+\noindent
+Note that the normalizing factor of $\frac{1}{t-1}$ is absent in the above expression because it is canceled by the two occurances of $\sqrt{\frac{1}{t-1}}$ in the denominator.\\\\
+
+\noindent
+Define the sample variance $s_*$ as:
+\begin{gather}
+s_* = \sqrt{\frac{1}{t-1}\big(u_*-\mathbbm{1}\overline{u}_*\big)^\top\big(u_*-\mathbbm{1}\overline{u}_*\big)}
+\end{gather}
+
+\noindent
+Then we can compute the \textbf{row vector} $s$ as:
+\begin{gather}
+s =
+\begin{bmatrix}
+    s_{1} & \dots & s_{d}
+\end{bmatrix}
+= \sqrt{\frac{1}{t-1}\bigg(\mathbbm{1}^\top \Big(\big( A -  \mathbbm{1} \bar{o} \big) \odot \big( A -  \mathbbm{1} \bar{o} \big)\Big)\bigg)}
+\end{gather}
+
+%Note further that we can compute a row vector such that the $*^\text{th}$ term is $\big(u_*-\mathbbm{1}\overline{u}_*\big)^\top\big(u_*-\mathbbm{1}\overline{u}_*\big)$ as:
+
+\noindent
+Using the definition of the covariance matrix from the previous section, we can then write the correlation matrix as:
+\begin{gather}
+\rho = \dfrac{\Sigma}{\big(\mathbbm{1}s\big)\odot\big(\mathbbm{1}s\big)^\top} = \dfrac{\Sigma}{\big(\mathbbm{1}s\big)^{\top}\odot\big(\mathbbm{1}s\big)}
+\end{gather}
+\noindent
+where the division is performed element-wise.\\
+
+\noindent
+Additional optimizations which can be performed in the Theano code include:
+\begin{enumerate}
+  \item Removing the $\frac{1}{t-1}$ scaling factors, since they are present in both numerator and denominator
+  \item Removing the square roots, since the final step involves element-wise squaring
+  \item Replacing the multiplications by $\mathbbm{1}$ with broadcasting and axis-wise summation 
+  \item Replacing the Hadamard products with element-wise squaring
+\end{enumerate}
+
+\noindent
+\textbf{Update}: Implemented optimization 3 and 4, but optimizations 1 and 2 don't speed things up enough to make it worth the confusion.
+\end{document}  

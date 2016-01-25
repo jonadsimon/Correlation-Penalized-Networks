@@ -22,13 +22,12 @@ __docformat__ = 'restructedtext en'
 
 
 import os
-import sys
 import timeit
+import pandas as pd
 
 import numpy as np
 import theano
 import theano.tensor as T
-
 
 from logistic_sgd import LogisticRegression, load_data
 from hidden_layer import HiddenLayer
@@ -120,48 +119,23 @@ class MLP(object):
         # keep track of model input
         self.input = input
 
-    def set_covariance(self):
-        '''
-        Computes and sets class variable "self.off_diag_cov_sqr"
-        See LaTeX notes for an explanation of the formula
-        Also, consider *not* making everything "self"
-        Q: What's the downside of using "np.cov", as I'm doing now?
-        A: Can't auto-compute gradient
-        '''
+        # This block only gets computed if the alternative cost function is use. Clever compiler...
         self.minibatch_size = self.hiddenLayer.output.shape[0]
         self.mean_activation = self.hiddenLayer.output.mean(0)
         self.centered_activation = self.hiddenLayer.output - self.mean_activation # casts over rows
         self.activation_covariance = 1.0/(self.minibatch_size-1) * self.centered_activation.T.dot(self.centered_activation)
-        # self.activation_covariance = np.cov(self.hiddenLayer.output, rowvar=0) # replaces the above 4 lines
-        self.covariance_squared = self.activation_covariance**2 # element-wise squaring
-        self.off_diag_cov_sqr = self.covariance_squared.sum() - self.covariance_squared.diagonal().sum() # not numerically stable...
+        self.std_vec = (1.0/(self.minibatch_size-1) * (self.centered_activation**2).sum(0))**(0.5)
+        self.activation_correlation = (self.activation_covariance / self.std_vec).T / self.std_vec # works because matrix is symmetric
+        self.cor_sqr_sum = (self.activation_correlation**2).sum() # square element-wise and sum
 
-    def set_correlation(self):
-        '''
-        Computes and sets class variable "self.off_diag_cor_sqr"
-        See LaTeX notes for an explanation of the formula, and further optimizations
-        Also, consider *not* making everything "self"
-        Q: What's the downside of using "np.corrcoef", as I'm doing now?
-        A: Can't auto-compute gradient
-        '''
-        self.minibatch_size = self.hiddenLayer.output.shape[0]
-        self.mean_activation = self.hiddenLayer.output.mean(0)
-        self.centered_activation = self.hiddenLayer.output - self.mean_activation # casts over rows
-        self.activation_covariance = 1.0/(self.minibatch_size-1) * self.centered_activation.T.dot(self.centered_activation)
-        self.inv_std_vec = (1.0/(self.minibatch_size-1) * (self.centered_activation**2).sum(0))**(-0.5)
-        self.activation_correlation = (self.inv_std_vec * self.activation_covariance).T * self.inv_std_vec # works because matrix is symmetric
-        # self.activation_correlation = np.corrcoef(self.hiddenLayer.output, rowvar=0) # replaces the above 6 lines
-        self.correlation_squared = self.activation_correlation**2 # element-wise squaring
-        self.off_diag_cor_sqr = self.correlation_squared.sum() - self.correlation_squared.diagonal().sum() # not numerically stable...
+def flatten_correlation_matrix(correlation_matrix):
+    '''
+    Accepts a matrix as input, and returns a 1D array containing its lower-triangular entries
+    '''
+    return np.array([correlation_matrix[i,j] for i in range(correlation_matrix.shape[0]) for j in range(correlation_matrix.shape[1]) if i>j])
 
-    def get_correlation(self):
-        if not self.activation_correlation:
-            self.set_correlation()
-        return self.activation_correlation
-
-
-def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, cor_reg=0.00, rand_seed=1234,
-             n_epochs=1000, dataset='mnist.pkl.gz', batch_size=20, n_hidden=500, save_pairwise_activations=False):
+def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_seed=1234, n_epochs=1000,
+             dataset='mnist.pkl.gz', batch_size=20, n_hidden=500, save_correlations=False):
     """
     Demonstrate stochastic gradient descent optimization for a multilayer
     perceptron
@@ -225,64 +199,41 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, cor_r
     # the cost we minimize during training is the negative log likelihood of
     # the model plus the regularization terms (L1 and L2); cost is expressed
     # here symbolically
-    if cov_reg == 0 and cor_reg == 0:
+    if cor_reg == 0:
         cost = (
             classifier.negative_log_likelihood(y)
             + L1_reg * classifier.L1
             + L2_reg * classifier.L2_sqr
-        )
-    elif cov_reg != 0 and cor_reg == 0:
-        classifier.set_covariance()
-        cost = (
-            classifier.negative_log_likelihood(y)
-            + L1_reg * classifier.L1
-            + L2_reg * classifier.L2_sqr
-            + cov_reg * classifier.off_diag_cov_sqr
-        )
-    elif cov_reg == 0 and cor_reg != 0:
-        classifier.set_correlation()
-        cost = (
-            classifier.negative_log_likelihood(y)
-            + L1_reg * classifier.L1
-            + L2_reg * classifier.L2_sqr
-            + cor_reg * classifier.off_diag_cor_sqr
         )
     else:
-        print "\nCannot use covariance and correlation penalties simulataneously.\nTerminating program..."
-        sys.exit(1)
+        cost = (
+            classifier.negative_log_likelihood(y)
+            + L1_reg * classifier.L1
+            + L2_reg * classifier.L2_sqr
+            + cor_reg * classifier.cor_sqr_sum
+        )
     # end-snippet-4
 
     # compiling a Theano function that computes the mistakes that are made
     # by the model on a minibatch
-    validate_model = theano.function(
-        inputs=[index],
-        outputs=classifier.errors(y),
-        givens={
-            x: valid_set_x[index * batch_size:(index + 1) * batch_size],
-            y: valid_set_y[index * batch_size:(index + 1) * batch_size]
-        }
-    )
-
-    # # compiling a Theano function that computes the mistakes that are made
-    # # by the model on a minibatch
-    # if save_pairwise_activations:
-    #     validate_model = theano.function(
-    #         inputs=[index],
-    #         outputs=[classifier.errors(y), classifier.get_correlation()],
-    #         givens={
-    #             x: valid_set_x[index * batch_size:(index + 1) * batch_size],
-    #             y: valid_set_y[index * batch_size:(index + 1) * batch_size]
-    #         }
-    #     )
-    # else:
-    #     validate_model = theano.function(
-    #         inputs=[index],
-    #         outputs=classifier.errors(y),
-    #         givens={
-    #             x: valid_set_x[index * batch_size:(index + 1) * batch_size],
-    #             y: valid_set_y[index * batch_size:(index + 1) * batch_size]
-    #         }
-    #     )
+    if save_correlations:
+        validate_model = theano.function(
+            inputs=[index],
+            outputs=[classifier.errors(y), classifier.activation_correlation],
+            givens={
+                x: valid_set_x[index * batch_size:(index + 1) * batch_size],
+                y: valid_set_y[index * batch_size:(index + 1) * batch_size]
+            }
+        )
+    else:
+        validate_model = theano.function(
+            inputs=[index],
+            outputs=classifier.errors(y),
+            givens={
+                x: valid_set_x[index * batch_size:(index + 1) * batch_size],
+                y: valid_set_y[index * batch_size:(index + 1) * batch_size]
+            }
+        )
 
     # start-snippet-5
     # compute the gradient of cost with respect to theta (sotred in params)
@@ -324,26 +275,47 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, cor_r
     best_epoch = 0
     start_time = timeit.default_timer()
 
+    # Open file for writing validation losses, and write the header
+    valid_loss_filename = 'ValidationLoss_Epoch%i_Batch%i_Cor%f_Drop%f.csv' % (n_epochs, n_epochs*n_train_batches, cor_reg, 1.0)
+    valid_loss_filepath = os.path.join(os.path.split(__file__)[0], '..', 'output', 'MLP', valid_loss_filename)
+    valid_loss_outfile = open(valid_loss_filepath, 'w')
+    valid_loss_outfile.write('Epoch,Iteration,Error\n')
+
     epoch = 0
     while epoch < n_epochs:
         epoch += 1
         index_perm = rng.permutation(train_set_x.get_value(borrow=True).shape[0])  # generate new permutation of indices
 
+        # perform 1 epoch of training
         for minibatch_index in xrange(n_train_batches):
-
             minibatch_avg_cost = train_model(minibatch_index, index_perm)
 
         # compute zero-one loss on validation set
-        validation_losses = [validate_model(i) for i in xrange(n_valid_batches)]
-        this_validation_loss = np.mean(validation_losses)
+        if save_correlations:
+            validation_losses = []
+            mean_correlations = 0 # contains mean correlation matrix once loop is finished
+            for i in xrange(n_valid_batches):
+                valid_loss, valid_corr = validate_model(i)
+                validation_losses.append(valid_loss)
+                mean_correlations += (1.0 * valid_corr / n_valid_batches) # iteratively constructs mean to save memory
+            this_validation_loss = np.mean(validation_losses)
+            flat_mean_correlation = flatten_correlation_matrix(mean_correlations)
+        else:
+            validation_losses = [validate_model(i) for i in xrange(n_valid_batches)]
+            this_validation_loss = np.mean(validation_losses)
 
+        # Write this epoch's validation error to the file
+        valid_loss_outfile.write(('%i,%i,%f\n') % (epoch, epoch*n_train_batches, this_validation_loss))
+
+        # ********COMMENT THIS OUT WHEN RUNNING MULTIPLE PARAMS OVERNIGHT********
         print('epoch %i (iteration %i), validation error %f %%' % (epoch, epoch*n_train_batches, this_validation_loss * 100.))
 
         # if we got the best validation score until now
         if this_validation_loss < best_validation_loss:
-
             best_validation_loss = this_validation_loss
             best_epoch = epoch
+
+    valid_loss_outfile.close()
 
     end_time = timeit.default_timer()
     print(('Optimization complete. Best validation score of %f %% '
@@ -355,3 +327,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cov_reg=0.00, cor_r
 
 if __name__ == '__main__':
     test_mlp(cor_reg=0.0001, n_epochs=10, batch_size=20)
+
+    # cor_list = [0.00001, 0.00005, 0.0001, 0.0005]
+    # for this_cor in cor_list:
+    #     test_mlp(cor_reg=this_cor, n_epochs=100, batch_size=20)
