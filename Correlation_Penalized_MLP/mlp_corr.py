@@ -23,7 +23,6 @@ __docformat__ = 'restructedtext en'
 
 import os
 import timeit
-import pandas as pd
 
 import numpy as np
 import theano
@@ -280,6 +279,10 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
     valid_loss_filepath = os.path.join(os.path.split(__file__)[0], '..', 'output', 'MLP', valid_loss_filename)
     valid_loss_outfile = open(valid_loss_filepath, 'w')
     valid_loss_outfile.write('Epoch,Iteration,Error\n')
+    if save_correlations:
+        flat_corr_filename = 'FlatCorrelations_Epoch%i_Batch%i_Cor%f_Drop%f.csv' % (n_epochs, n_epochs*n_train_batches, cor_reg, 1.0)
+        flat_corr_filepath = os.path.join(os.path.split(__file__)[0], '..', 'output', 'MLP', flat_corr_filename)
+        flat_corr_outfile = open(flat_corr_filepath, 'w')
 
     epoch = 0
     while epoch < n_epochs:
@@ -300,6 +303,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
                 mean_correlations += (1.0 * valid_corr / n_valid_batches) # iteratively constructs mean to save memory
             this_validation_loss = np.mean(validation_losses)
             flat_mean_correlation = flatten_correlation_matrix(mean_correlations)
+            flat_corr_outfile.write(str(epoch)+','+','.join(map(str,flat_mean_correlation))+'\n')
         else:
             validation_losses = [validate_model(i) for i in xrange(n_valid_batches)]
             this_validation_loss = np.mean(validation_losses)
@@ -316,6 +320,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
             best_epoch = epoch
 
     valid_loss_outfile.close()
+    if save_correlations:
+        flat_corr_outfile.close()
 
     end_time = timeit.default_timer()
     print(('Optimization complete. Best validation score of %f %% '
@@ -326,7 +332,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
 
 
 if __name__ == '__main__':
-    test_mlp(cor_reg=0.0001, n_epochs=10, batch_size=20)
+    test_mlp(cor_reg=0, n_epochs=10, batch_size=20, save_correlations=True)
 
     # cor_list = [0.00001, 0.00005, 0.0001, 0.0005]
     # for this_cor in cor_list:
