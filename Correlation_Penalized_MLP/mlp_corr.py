@@ -133,8 +133,8 @@ def flatten_correlation_matrix(correlation_matrix):
     '''
     return np.array([correlation_matrix[i,j] for i in range(correlation_matrix.shape[0]) for j in range(correlation_matrix.shape[1]) if i>j])
 
-def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_seed=1234, n_epochs=1000,
-             dataset='mnist.pkl.gz', batch_size=20, n_hidden=500, save_correlations=False):
+def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, cor_scaling=1.0, rand_seed=1234,
+            n_epochs=1000, dataset='mnist.pkl.gz', batch_size=20, n_hidden=500, save_correlations=False):
     """
     Demonstrate stochastic gradient descent optimization for a multilayer
     perceptron
@@ -177,6 +177,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
     print '... building the model'
 
     # allocate symbolic variables for the data
+    cor_reg_var = theano.shared(cor_reg) # symbolic variable storing cor_reg value
+    alpha = T.dscalar('alpha') # scaling factor for weight decay
     index = T.lscalar()  # index to a [mini]batch
     perm = T.lvector()  # permutation of the indices of the training samples
     x = T.matrix('x')  # the data is presented as rasterized images
@@ -209,7 +211,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
             classifier.negative_log_likelihood(y)
             + L1_reg * classifier.L1
             + L2_reg * classifier.L2_sqr
-            + cor_reg * classifier.cor_sqr_sum
+            + cor_reg_var * classifier.cor_sqr_sum
+            # + cor_reg * classifier.cor_sqr_sum
         )
     # end-snippet-4
 
@@ -265,6 +268,13 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
     )
     # end-snippet-5
 
+    # update the symbolic cor_reg valiable
+    update_cor_reg = theano.function(
+        inputs=[alpha],
+        outputs=cor_reg_var,
+        updates=[(cor_reg_var, cor_reg_var*alpha)]
+    )
+
     ###############
     # TRAIN MODEL #
     ###############
@@ -275,12 +285,12 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
     start_time = timeit.default_timer()
 
     # Open file for writing validation losses, and write the header
-    valid_loss_filename = 'ValidationLoss_Epoch%i_Batch%i_Cor%f_Drop%f.csv' % (n_epochs, n_epochs*n_train_batches, cor_reg, 1.0)
+    valid_loss_filename = 'ValidationLoss_Epoch%i_Batch%i_Cor%f_Drop%f_Scale%f.csv' % (n_epochs, n_epochs*n_train_batches, cor_reg, 1.0, cor_scaling)
     valid_loss_filepath = os.path.join(os.path.split(__file__)[0], '..', 'output', 'MLP', valid_loss_filename)
     valid_loss_outfile = open(valid_loss_filepath, 'w')
     valid_loss_outfile.write('Epoch,Iteration,Error\n')
     if save_correlations:
-        flat_corr_filename = 'FlatCorrelations_Epoch%i_Batch%i_Cor%f_Drop%f.csv' % (n_epochs, n_epochs*n_train_batches, cor_reg, 1.0)
+        flat_corr_filename = 'FlatCorrelations_Epoch%i_Batch%i_Cor%f_Drop%f_Scale%f.csv' % (n_epochs, n_epochs*n_train_batches, cor_reg, 1.0, cor_scaling)
         flat_corr_filepath = os.path.join(os.path.split(__file__)[0], '..', 'output', 'MLP', flat_corr_filename)
         flat_corr_outfile = open(flat_corr_filepath, 'w')
 
@@ -294,7 +304,7 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
             minibatch_avg_cost = train_model(minibatch_index, index_perm)
 
         # compute zero-one loss on validation set
-        if save_correlations:
+        if save_correlations: # compute and save the average pairwise correlations
             validation_losses = []
             mean_correlations = 0 # contains mean correlation matrix once loop is finished
             for i in xrange(n_valid_batches):
@@ -312,12 +322,16 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
         valid_loss_outfile.write(('%i,%i,%f\n') % (epoch, epoch*n_train_batches, this_validation_loss))
 
         # ********COMMENT THIS OUT WHEN RUNNING MULTIPLE PARAMS OVERNIGHT********
-        print('epoch %i (iteration %i), validation error %f %%' % (epoch, epoch*n_train_batches, this_validation_loss * 100.))
+        print('epoch %i (iteration %i), validation error %f %%, cor_reg %f' % (epoch, epoch*n_train_batches, this_validation_loss * 100., cor_reg_var.get_value()))
 
         # if we got the best validation score until now
         if this_validation_loss < best_validation_loss:
             best_validation_loss = this_validation_loss
             best_epoch = epoch
+
+        # Update the value of cor_reg for the next epoch
+        if cor_scaling != 1:
+            old_cor_reg = update_cor_reg(cor_scaling)
 
     valid_loss_outfile.close()
     if save_correlations:
@@ -332,8 +346,8 @@ def test_mlp(learning_rate=0.01, L1_reg=0.00, L2_reg=0.0001, cor_reg=0.00, rand_
 
 
 if __name__ == '__main__':
-    test_mlp(cor_reg=0, n_epochs=10, batch_size=20, save_correlations=True)
+    test_mlp(cor_reg=1e-3, n_epochs=10, batch_size=20, save_correlations=True, cor_scaling=0.9)
 
-    # cor_list = [0.00001, 0.00005, 0.0001, 0.0005]
+    # cor_list = [1.0e-2, 1.0e-3, 1.0e-4, 1.0e-5, 0.0]
     # for this_cor in cor_list:
-    #     test_mlp(cor_reg=this_cor, n_epochs=100, batch_size=20)
+    #     test_mlp(cor_reg=this_cor, n_epochs=100, batch_size=20, save_correlations=True)
